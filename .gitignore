@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+db.sqlite3
+staticfiles/
+*.pkl
+data/raw/*.csv
+data/processed/*.csv
+.venv/
+venv/

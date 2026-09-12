@@ -1,0 +1,11 @@
+{
+  "feature_columns": [
+    "irradiation",
+    "ambient_temperature",
+    "module_temperature",
+    "hour",
+    "month"
+  ],
+  "target": "capacity_factor",
+  "note": "Model predicts capacity_factor (0-1). predicted_power_kw = capacity_factor * user_system_size_kw. No scaler needed -- tree-based model, and no feature scaling was applied."
+}

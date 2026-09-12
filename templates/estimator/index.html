@@ -1,0 +1,195 @@
+{% extends "estimator/base.html" %}
+
+{% block content %}
+<div class="row g-4">
+    <div class="col-md-5">
+        <div class="card card-input">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Estimate your daily solar yield</h2>
+                <form method="post">
+                    {% csrf_token %}
+                    {% for field in form %}
+                        <div class="mb-3">
+                            <label class="form-label">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.help_text %}
+                                <div class="form-text">{{ field.help_text }}</div>
+                            {% endif %}
+                            {% if field.errors %}
+                                <div class="text-danger small">{{ field.errors }}</div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-primary w-100">Estimate yield</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="card card-result h-100">
+            <div class="card-body">
+                <h2 class="h5 mb-3">Results</h2>
+                {% if result %}
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <div class="text-muted small mb-1">Predicted daily yield</div>
+                            <div class="figure-large">{{ result.predicted_daily_yield_kwh }} <span class="fs-6 fw-normal">kWh</span></div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-muted small mb-1">Estimated monthly savings</div>
+                            <div class="figure-large">₱{{ result.estimated_monthly_php_savings }}</div>
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-3">
+                        {{ result.get_city_display }}, {{ result.get_month_used_display }} ·
+                        {{ result.system_size_kw }} kW system at {{ result.panel_tilt_deg }}° tilt ·
+                        ₱{{ result.electricity_rate_php_per_kwh }}/kWh
+                    </p>
+                    <canvas id="yieldChart" height="110"></canvas>
+                {% else %}
+                    <p class="text-muted">Fill out the form to see an estimate here.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if result %}
+<div class="row g-4 mt-1">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h6 mb-3">How this number was calculated</h2>
+                <ol class="small mb-0 ps-3">
+                    <li class="mb-2">Looked up {{ result.get_city_display }}'s average solar resource for
+                        {{ result.get_month_used_display }}: {{ breakdown.avg_peak_sun_hours }} kWh/m²/day of
+                        sunlight, {{ breakdown.avg_ambient_temp_c }}°C average temperature.</li>
+                    <li class="mb-2">Simulated a day's irradiance and module-temperature curve from those
+                        averages, then ran it through the trained model to get an expected capacity factor
+                        of {{ breakdown.predicted_avg_capacity_factor }} (fraction of rated output).</li>
+                    <li class="mb-2">Applied a tilt adjustment: {{ result.panel_tilt_deg }}° vs. an estimated
+                        optimal {{ breakdown.optimal_tilt_deg }}° for this city → ×{{ breakdown.tilt_efficiency_factor }}
+                        efficiency factor.</li>
+                    <li class="mb-0">Multiplied by system size and integrated across daylight hours to get
+                        {{ result.predicted_daily_yield_kwh }} kWh/day, then by days in the month and the
+                        ₱{{ result.electricity_rate_php_per_kwh }}/kWh rate for the savings figure.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h2 class="h6 mb-0">Monthly outlook, same system &amp; city</h2>
+                    <div class="text-end">
+                        <div class="text-muted small">Est. annual</div>
+                        <div class="fw-semibold">{{ annual_kwh }} kWh · ₱{{ annual_php }}</div>
+                    </div>
+                </div>
+                <canvas id="outlookChart" height="140"></canvas>
+                <p class="text-muted small mt-2 mb-0">
+                    Seasonal variation only — same tilt and rate assumptions as above.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if recent_estimates %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2 class="h6 mb-3">Recent estimates</h2>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>City</th>
+                        <th>Month</th>
+                        <th>System</th>
+                        <th>Tilt</th>
+                        <th>Daily yield</th>
+                        <th>Monthly savings</th>
+                        <th>When</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for est in recent_estimates %}
+                    <tr>
+                        <td>{{ est.get_city_display }}</td>
+                        <td>{{ est.get_month_used_display }}</td>
+                        <td>{{ est.system_size_kw }} kW</td>
+                        <td>{{ est.panel_tilt_deg }}°</td>
+                        <td>
+                            {% if est.predicted_daily_yield_kwh %}{{ est.predicted_daily_yield_kwh }} kWh
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if est.estimated_monthly_php_savings %}₱{{ est.estimated_monthly_php_savings }}
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        <td class="text-muted small">{{ est.created_at|date:"M j, H:i" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% if result and result.predicted_daily_yield_kwh %}
+<script>
+    const hourlyProfile = {{ hourly_profile_json|safe }};
+    new Chart(document.getElementById('yieldChart'), {
+        type: 'line',
+        data: {
+            labels: hourlyProfile.map(p => p.hour.toFixed(2) + 'h'),
+            datasets: [{
+                label: 'Predicted power (kW)',
+                data: hourlyProfile.map(p => p.power_kw),
+                borderColor: '#0E6B4F',
+                backgroundColor: 'rgba(14, 107, 79, 0.12)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { maxTicksLimit: 8 } },
+                y: { title: { display: true, text: 'kW' }, beginAtZero: true }
+            }
+        }
+    });
+</script>
+{% endif %}
+{% if monthly_outlook_json and monthly_outlook_json != "null" %}
+<script>
+    const monthlyOutlook = {{ monthly_outlook_json|safe }};
+    new Chart(document.getElementById('outlookChart'), {
+        type: 'bar',
+        data: {
+            labels: monthlyOutlook.map(m => m.month_label.slice(0, 3)),
+            datasets: [{
+                label: 'Daily yield (kWh)',
+                data: monthlyOutlook.map(m => m.daily_kwh),
+                backgroundColor: '#E8940C',
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { title: { display: true, text: 'kWh/day' }, beginAtZero: true } }
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}
